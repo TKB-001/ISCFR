@@ -396,12 +396,12 @@ def Ahom_set(
     _add_statement(x_name, lambda assertion: _obj(assertion, d_name))
     _add_statement(b_name, lambda assertion: _obj(assertion, s_name))
 
-    A_child = partial(rel_child, name1=relation_name, name2=d_name, name3=a_name)
+    D_child = partial(rel_child, name1=relation_name, name2=a_name, name3=d_name)
 
-
-    _add_statement(b_name, lambda assertion: A_child(assertion))
+    _add_statement(b_name, lambda assertion: D_child(assertion))
     _add_statement(s_name, lambda assertion: _obj(assertion, a_name))
     return b_name
+
 
 def Dhom_set(
     x_name="x",
@@ -412,31 +412,31 @@ def Dhom_set(
     relation_name="r",
 ):
     resolved = _resolve_example_names(
-        defaults={
-            "x_name": "x",
-            "b_name": "B",
-            "s_name": "s",
-            "d_name": "D",
-            "a_name": "A",
-            "relation_name": "r",
-        },
-        provided={
-            "x_name": x_name,
-            "b_name": b_name,
-            "s_name": s_name,
-            "d_name": d_name,
-            "a_name": a_name,
-            "relation_name": relation_name,
-        },
-        owner_classes={
-            "x_name": Framework,
-            "b_name": Framework,
-            "s_name": Framework,
-            "d_name": Obj,
-            "a_name": Obj,
-            "relation_name": Relation,
-        },
-    )
+    defaults={
+        "x_name": "x",
+        "b_name": "B",
+        "s_name": "s",
+        "d_name": "D",
+        "a_name": "A",
+        "relation_name": "r",
+    },
+    provided={
+        "x_name": x_name,
+        "b_name": b_name,
+        "s_name": s_name,
+        "d_name": d_name,
+        "a_name": a_name,
+        "relation_name": relation_name,
+    },
+    owner_classes={
+        "x_name": Framework,
+        "b_name": Framework,
+        "s_name": Framework,
+        "d_name": Obj,
+        "a_name": Obj,
+        "relation_name": Relation,
+    },
+)
     x_name = resolved["x_name"]
     b_name = resolved["b_name"]
     s_name = resolved["s_name"]
@@ -453,9 +453,10 @@ def Dhom_set(
     _add_statement(x_name, lambda assertion: _obj(assertion, d_name))
     _add_statement(b_name, lambda assertion: _obj(assertion, s_name))
 
-    D_child = partial(rel_child, name1=relation_name, name2=a_name, name3=d_name)
+    A_child = partial(rel_child, name1=relation_name, name2=d_name, name3=a_name)
 
-    _add_statement(b_name, lambda assertion: D_child(assertion))
+
+    _add_statement(b_name, lambda assertion: A_child(assertion))
     _add_statement(s_name, lambda assertion: _obj(assertion, a_name))
     return b_name
 
@@ -521,7 +522,7 @@ def cone(
     _add_statement(h_name, lambda assertion: Cone_child(assertion))
     return j_name
 
-def limit(hom1 = "D", hom2 = "D"):
+def limit(hom1 = "D", hom2 = "A"):
     # hom1 and hom2 decide if Ahoms or Dhoms get used
     hom1_builder = Dhom_set if hom1 == "D" else Ahom_set
     hom2_builder = Dhom_set if hom2 == "D" else Ahom_set
@@ -529,17 +530,17 @@ def limit(hom1 = "D", hom2 = "D"):
     def _build_limit_sequence():
         # foundational cones
         cone()
-        #add_section_break()
+        add_section_break()
 
         cone(j_name="k")
-        #add_section_break()
+        add_section_break()
 
         # hom-sets
         J_B = hom1_builder(x_name="j")
-        #add_section_break()
+        add_section_break()
 
         K_B = hom2_builder(x_name="k")
-        #add_section_break()
+        add_section_break()
 
         # factor property
         Dhom_set(x_name=K_B, s_name=J_B)

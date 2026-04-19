@@ -8,6 +8,9 @@ import examples
 
 sys.stdout.reconfigure(encoding="utf-8")
 
+_SECTION_BREAK_FRAMEWORK = "__section_break_framework__"
+_SECTION_BREAK_ASSERTION = "__section_break_assertion__"
+
 def check_naming_overlaps(tree):
     """Check for duplicate names in the tree and return overlaps."""
     name_count = defaultdict(list)
@@ -41,6 +44,14 @@ def check_naming_overlaps(tree):
     for name in sorted(overlaps):
         ordered[name] = sorted(overlaps[name], key=lambda item: item[0])
     return ordered
+
+
+def _is_section_break_name(name):
+    return name in {_SECTION_BREAK_FRAMEWORK, _SECTION_BREAK_ASSERTION}
+
+
+def _is_section_break_node(node):
+    return _is_section_break_name(getattr(node, "name", None))
 
 def _render_relation_arg(node):
     if node is None:
@@ -215,7 +226,7 @@ def _parse_relation_endpoint(node, host_name, graph, style):
         return None
     name = getattr(node, 'name', None)
 
-    if isinstance(node, Main.Newline) or name == "__section_break_framework__" or name == "__section_break_assertion__":
+    if isinstance(node, Main.Newline) or _is_section_break_name(name):
         return None
     if isinstance(node, Main.Obj):
         if _is_framework_like_node(node):
@@ -257,7 +268,7 @@ def _parse_asserted_content(host_name, node, graph, style):
     if node is None:
         raise ValueError("Assertibility nodes must have exactly one child.")
     name = getattr(node, 'name', None)
-    if isinstance(node, Main.Newline) or name == "__section_break_framework__" or name == "__section_break_assertion__":
+    if isinstance(node, Main.Newline) or _is_section_break_name(name):
         return None
     if isinstance(node, Main.Obj):
         if _is_framework_like_node(node):
@@ -301,6 +312,7 @@ def _build_diagram_graph(tree):
         for node in tree
         if isinstance(node, Main.Framework)
         and not isinstance(node, (Main.Assertibility, Main.Unassertibility))
+        and not _is_section_break_node(node)
     ]
 
     for framework in framework_nodes:
@@ -500,12 +512,124 @@ def _shared_object_position(host_names, framework_positions):
     return (avg_x, avg_y)
 
 
-def _place_objects(graph, framework_positions):
+def _circle_padding_for_label(radius):
+    return max(11.0, min(24.0, radius * 0.65))
+
+
+def _text_font_size_for_radius(radius, *, minimum=10.0, maximum=18.0):
+    return max(minimum, min(maximum, radius * 0.42))
+
+
+def _point_within_circle(point, circle, clearance=0.0):
+    px, py = point
+    cx, cy, radius = circle
+    return math.hypot(px - cx, py - cy) <= max(0.0, radius - clearance)
+
+
+def _framework_descendants(children_by_parent):
+    descendants = {}
+
+    def collect(framework_name):
+        cached = descendants.get(framework_name)
+        if cached is not None:
+            return cached
+        found = set()
+        for child_name in children_by_parent.get(framework_name, []):
+            found.add(child_name)
+            found.update(collect(child_name))
+        descendants[framework_name] = found
+        return found
+
+    for framework_name in children_by_parent:
+        collect(framework_name)
+    return descendants
+
+
+def _object_font_size(object_name, hosts, framework_positions):
+    radii = [framework_positions[host_name][2] for host_name in hosts if host_name in framework_positions]
+    if not radii:
+        return 18.0
+    return _text_font_size_for_radius(min(radii))
+
+
+def _object_clearance(object_name, host_radius):
+    font_size = _text_font_size_for_radius(host_radius)
+    text_width = len(str(object_name)) * (font_size * 0.34)
+    return max(10.0, (text_width / 2.0) + (font_size * 0.45))
+
+
+def _find_host_object_positions(host_name, object_names, framework_positions, blocked_framework_names):
+    cx, cy, radius = framework_positions[host_name]
+    host_circle = framework_positions[host_name]
+    blocked_circles = [
+        framework_positions[framework_name]
+        for framework_name in sorted(blocked_framework_names)
+        if framework_name in framework_positions
+    ]
+
+    if not object_names:
+        return {}
+
+    positions = {}
+    placed = []
+    ring_step = max(18.0, radius * 0.14)
+    max_ring_radius = max(18.0, radius - max(20.0, radius * 0.14))
+    min_ring_radius = max(12.0, radius * 0.20)
+    ring_radii = []
+    ring_radius = max_ring_radius
+    while ring_radius >= min_ring_radius:
+        ring_radii.append(ring_radius)
+        ring_radius -= ring_step
+    if not ring_radii:
+        ring_radii = [max(radius * 0.45, 12.0)]
+
+    angle_count = max(18, len(object_names) * 10)
+    golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+
+    for object_name in sorted(object_names):
+        clearance = _object_clearance(object_name, radius)
+        point = None
+        for ring_index, ring_radius in enumerate(ring_radii):
+            for angle_index in range(angle_count):
+                angle = ((angle_index * golden_angle) + (ring_index * 0.31)) % (2.0 * math.pi)
+                candidate = (
+                    cx + ring_radius * math.cos(angle),
+                    cy + ring_radius * math.sin(angle),
+                )
+                if not _point_within_circle(candidate, host_circle, clearance):
+                    continue
+                if any(
+                    _point_within_circle(candidate, blocked_circle, clearance)
+                    for blocked_circle in blocked_circles
+                ):
+                    continue
+                if any(
+                    math.hypot(candidate[0] - other_point[0], candidate[1] - other_point[1]) < (clearance + other_clearance)
+                    for other_point, other_clearance in placed
+                ):
+                    continue
+                point = candidate
+                break
+            if point is not None:
+                break
+        if point is None:
+            if blocked_circles:
+                point = (cx, cy - max(0.0, radius * 0.55))
+            else:
+                point = (cx, cy + (radius * 0.35))
+        positions[object_name] = point
+        placed.append((point, clearance))
+
+    return positions
+
+
+def _place_objects(graph, framework_positions, children_by_parent):
     object_positions = {}
     object_to_hosts = {}
     host_unique_objects = defaultdict(list)
     shared_objects = []
     floating_objects = []
+    descendants_by_host = _framework_descendants(children_by_parent)
 
     all_object_names = sorted(set(graph.object_hosts.keys()) | set(graph.object_relation_hosts.keys()))
     for object_name in all_object_names:
@@ -523,29 +647,14 @@ def _place_objects(graph, framework_positions):
         shared_objects.append((object_name, resolved_hosts))
 
     for host_name, object_names in host_unique_objects.items():
-        cx, cy, radius = framework_positions[host_name]
-        object_names = sorted(object_names)
-        count = len(object_names)
-        if count == 1:
-            object_positions[object_names[0]] = (cx, cy + radius * 0.35)
-            continue
-        ring_step = max(20.0, radius * 0.16)
-        min_arc = 26.0
-        ring_radius = max(22.0, radius * 0.34)
-        placed = 0
-        ring_idx = 0
-        while placed < count:
-            capacity = max(1, int((2.0 * math.pi * ring_radius) / min_arc))
-            use_count = min(capacity, count - placed)
-            angle_offset = (ring_idx * 0.43) % (2.0 * math.pi)
-            for local_idx in range(use_count):
-                angle = angle_offset + (2.0 * math.pi * local_idx / use_count)
-                ox = cx + ring_radius * math.cos(angle)
-                oy = cy + ring_radius * math.sin(angle) + (radius * 0.08)
-                object_positions[object_names[placed + local_idx]] = (ox, oy)
-            placed += use_count
-            ring_idx += 1
-            ring_radius = min(radius * 0.84, ring_radius + ring_step)
+        object_positions.update(
+            _find_host_object_positions(
+                host_name,
+                object_names,
+                framework_positions,
+                descendants_by_host.get(host_name, set()),
+            )
+        )
 
     shared_cluster_offsets = defaultdict(int)
     for object_name, host_names in shared_objects:
@@ -618,7 +727,7 @@ def _build_diagram_svg(tree):
     framework_positions = layout["positions"]
     width = layout["width"]
     height = layout["height"]
-    object_positions, object_to_hosts = _place_objects(graph, framework_positions)
+    object_positions, object_to_hosts = _place_objects(graph, framework_positions, children_by_parent)
 
     note_blocks = []
     max_right = float(width)
@@ -714,6 +823,7 @@ def _build_diagram_svg(tree):
     for object_name, (ox, oy) in sorted(object_positions.items()):
         hosts = object_to_hosts.get(object_name, [])
         style = _style_for_object_node(object_name, hosts, graph)
+        font_size = _object_font_size(object_name, hosts, framework_positions)
         if style == "unasserted":
             color = "#b91c1c"
         elif len(hosts) > 1:
@@ -725,7 +835,7 @@ def _build_diagram_svg(tree):
             f'<text data-object="{_escape_attr(object_name)}" '
             f'data-hosts="{_escape_attr(hosts_value)}" '
             f'x="{ox:.2f}" y="{oy:.2f}" text-anchor="middle" '
-            'font-family="Georgia, serif" font-size="18" '
+            f'font-family="Georgia, serif" font-size="{font_size:.2f}" '
             f'fill="{color}">{_xml_escape(object_name)}</text>'
         )
 
@@ -734,11 +844,12 @@ def _build_diagram_svg(tree):
         key=lambda item: item[1][2],
         reverse=True,
     ):
-        label_y = cy - radius + 24.0
+        font_size = _text_font_size_for_radius(radius)
+        label_y = cy - radius + _circle_padding_for_label(radius)
         svg_parts.append(
             f'<text data-framework-label="{_escape_attr(framework_name)}" '
             f'x="{cx:.2f}" y="{label_y:.2f}" text-anchor="middle" '
-            'font-family="Georgia, serif" font-size="18" font-weight="bold" fill="#0f172a">'
+            f'font-family="Georgia, serif" font-size="{font_size:.2f}" font-weight="bold" fill="#0f172a">'
             f'{_xml_escape(framework_name)}</text>'
         )
 
@@ -822,4 +933,4 @@ def render(tree=Main.tree):
 
 if __name__ == "__main__":
     render(examples.limits)
-    svg = render_diagram(examples.example_tree_3, output_path="limits.svg")
+    svg = render_diagram(examples.example_tree_1, output_path="limits.svg")

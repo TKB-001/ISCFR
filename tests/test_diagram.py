@@ -69,6 +69,19 @@ def _svg_size(svg):
     return float(root.attrib["width"]), float(root.attrib["height"])
 
 
+def _text_attributes(svg, attr_name):
+    root = _parse_svg(svg)
+    attributes = {}
+    for elem in root.iter():
+        if not elem.tag.endswith("text"):
+            continue
+        key = elem.attrib.get(attr_name)
+        if not key:
+            continue
+        attributes[key] = elem.attrib
+    return attributes
+
+
 def _circle_inside(inner, outer, tolerance=1e-6):
     ix, iy, ir = inner
     ox, oy, oradius = outer
@@ -105,6 +118,27 @@ def test_hom_set_relation_direction_changes_between_ahom_and_dhom():
 
     assert ("r", "A", "D") in _relation_edges(dhom_svg)
     assert ("r", "D", "A") in _relation_edges(ahom_svg)
+
+
+def test_section_break_nodes_are_not_rendered_in_diagram():
+    examples = _reload_examples()
+    svg = render.render_diagram(examples.limits)
+
+    assert "__section_break_framework__" not in svg
+    assert "__section_break_assertion__" not in svg
+
+
+def test_outer_framework_objects_stay_outside_nested_frameworks():
+    examples = _reload_examples()
+    svg = render.render_diagram(examples.EXAMPLE_TREES["Dhom"])
+    frameworks = _framework_geometry(svg)
+    objects = _object_positions(svg)
+
+    d_x, d_y, hosts = objects["D"]
+    assert hosts == "x"
+    assert _point_inside((d_x, d_y), frameworks["x"])
+    assert not _point_inside((d_x, d_y), frameworks["B"])
+    assert not _point_inside((d_x, d_y), frameworks["s"])
 
 
 def test_object_in_two_frameworks_is_drawn_once_in_overlap_region():
@@ -251,6 +285,16 @@ def test_dense_diagram_scales_larger_than_simple_diagram():
     dense_size = _svg_size(dense_svg)
     assert dense_size[0] >= simple_size[0]
     assert dense_size[1] >= simple_size[1]
+
+
+def test_small_nested_frameworks_scale_text_to_fit():
+    examples = _reload_examples()
+    svg = render.render_diagram(examples.limits)
+    framework_labels = _text_attributes(svg, "data-framework-label")
+    object_labels = _text_attributes(svg, "data-object")
+
+    assert min(float(attrs["font-size"]) for attrs in framework_labels.values()) < 18.0
+    assert min(float(attrs["font-size"]) for attrs in object_labels.values()) < 18.0
 
 
 def test_render_diagram_writes_svg_to_disk():
