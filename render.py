@@ -1099,5 +1099,6 @@ def render(tree=Main.tree):
     return final
 
 if __name__ == "__main__":
-    render(examples.example_tree_1)
-    svg = render_diagram(examples.example_tree_1, output_path="limits.svg")
+
+    render(examples.colimits)
+    svg = render_diagram(examples.colimits, output_path="limits.svg")

@@ -634,6 +634,38 @@ def limit(hom1 = "D", hom2 = "A"):
     )
     tree.extend(merged)
     return merged
+def colimit(hom1 = "A", hom2 = "D"):
+    # hom1 and hom2 decide if Ahoms or Dhoms get used
+    hom1_builder = Dhom_set if hom1 == "D" else Ahom_set
+    hom2_builder = Dhom_set if hom2 == "D" else Ahom_set
+
+    def _build_limit_sequence():
+        # foundational cones
+        cone()
+        add_section_break()
+
+        cone(j_name="k")
+        add_section_break()
+
+        # hom-sets
+        J_B = hom1_builder(x_name="j")
+        add_section_break()
+
+        K_B = hom2_builder(x_name="k")
+        add_section_break()
+
+        # factor property
+        Ahom_set(x_name=K_B, s_name=J_B)
+
+    _trees_by_name, merged = build_examples_shared(
+        [("limit_sequence", _build_limit_sequence)],
+        warn=False,
+        warn_cross_tree=False,
+        warn_intra_tree=False,
+    )
+    tree.extend(merged)
+    return merged
+
 def build_examples():
     """
     Build and return all example trees.
@@ -647,7 +679,7 @@ def build_examples():
 
 
 EXAMPLE_TREES = build_examples()
-limits = _build_example(limit)
+colimits = _build_example(colimit)
 example_tree_1 = EXAMPLE_TREES["Dhom"]
 example_tree_2 = EXAMPLE_TREES["Ahom"]
 example_tree_3 = EXAMPLE_TREES["Cone"]
