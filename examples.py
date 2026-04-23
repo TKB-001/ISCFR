@@ -273,6 +273,20 @@ def _add_statement(framework_name, build_child):
     set_framework_children(framework, [assertion])
     return framework
 
+
+def _add_attached_statement(parent, framework_name, build_child, statement_name=None):
+    """
+    Create a non-root helper framework with one assertibility and one child.
+    This is useful when an assertion should render with a framework context but
+    should not become its own top-level printed line.
+    """
+    framework = add_framework(parent, framework_name)
+    assertion = add_assertibility(framework, statement_name or f"{framework_name}_stmt")
+    child = build_child(assertion)
+    set_assertibility_child(assertion, child)
+    set_framework_children(framework, [assertion])
+    return framework, assertion
+
 def add_section_break():
     """Insert a render-only separator that becomes a blank output line."""
     framework = add_framework(None, "__section_break_framework__")
@@ -392,14 +406,48 @@ def Ahom_set(
         name_as = Framework if name in framework_names else None
         return add_obj(parent, name, name_as=name_as)
 
-    _add_statement(x_name, lambda assertion: _obj(assertion, b_name))
-    _add_statement(x_name, lambda assertion: _obj(assertion, d_name))
     _add_statement(b_name, lambda assertion: _obj(assertion, s_name))
+    x_framework = add_framework(None, x_name)
+    x_statement = add_assertibility(x_framework, f"{x_name}_stmt")
+    s_framework = add_framework(None, s_name)
+    s_statement = add_assertibility(s_framework, f"{s_name}_stmt")
 
-    D_child = partial(rel_child, name1=relation_name, name2=a_name, name3=d_name)
+    helper_x, x_b_assertion = _add_attached_statement(
+        x_statement,
+        x_name,
+        lambda assertion: _obj(assertion, b_name),
+        statement_name=f"{x_name}_nested_b",
+    )
+    _helper_x, x_d_assertion = _add_attached_statement(
+        helper_x,
+        x_name,
+        lambda assertion: _obj(assertion, d_name),
+        statement_name=f"{x_name}_nested_d",
+    )
+    _helper_s, s_a_assertion = _add_attached_statement(
+        s_statement,
+        s_name,
+        lambda assertion: _obj(assertion, a_name),
+        statement_name=f"{s_name}_nested_a",
+    )
 
-    _add_statement(b_name, lambda assertion: D_child(assertion))
-    _add_statement(s_name, lambda assertion: _obj(assertion, a_name))
+    x_relation = rel_child(
+        x_statement,
+        relation_name,
+        s_a_assertion,
+        x_b_assertion,
+    )
+    s_relation = rel_child(
+        s_statement,
+        relation_name,
+        x_b_assertion,
+        x_d_assertion,
+    )
+
+    set_assertibility_child(x_statement, x_relation)
+    set_framework_children(x_framework, [x_statement])
+    set_assertibility_child(s_statement, s_relation)
+    set_framework_children(s_framework, [s_statement])
     return b_name
 
 
@@ -412,31 +460,31 @@ def Dhom_set(
     relation_name="r",
 ):
     resolved = _resolve_example_names(
-    defaults={
-        "x_name": "x",
-        "b_name": "B",
-        "s_name": "s",
-        "d_name": "D",
-        "a_name": "A",
-        "relation_name": "r",
-    },
-    provided={
-        "x_name": x_name,
-        "b_name": b_name,
-        "s_name": s_name,
-        "d_name": d_name,
-        "a_name": a_name,
-        "relation_name": relation_name,
-    },
-    owner_classes={
-        "x_name": Framework,
-        "b_name": Framework,
-        "s_name": Framework,
-        "d_name": Obj,
-        "a_name": Obj,
-        "relation_name": Relation,
-    },
-)
+        defaults={
+            "x_name": "x",
+            "b_name": "B",
+            "s_name": "s",
+            "d_name": "D",
+            "a_name": "A",
+            "relation_name": "r",
+        },
+        provided={
+            "x_name": x_name,
+            "b_name": b_name,
+            "s_name": s_name,
+            "d_name": d_name,
+            "a_name": a_name,
+            "relation_name": relation_name,
+        },
+        owner_classes={
+            "x_name": Framework,
+            "b_name": Framework,
+            "s_name": Framework,
+            "d_name": Obj,
+            "a_name": Obj,
+            "relation_name": Relation,
+        },
+    )
     x_name = resolved["x_name"]
     b_name = resolved["b_name"]
     s_name = resolved["s_name"]
@@ -449,15 +497,48 @@ def Dhom_set(
         name_as = Framework if name in framework_names else None
         return add_obj(parent, name, name_as=name_as)
 
-    _add_statement(x_name, lambda assertion: _obj(assertion, b_name))
-    _add_statement(x_name, lambda assertion: _obj(assertion, d_name))
     _add_statement(b_name, lambda assertion: _obj(assertion, s_name))
+    x_framework = add_framework(None, x_name)
+    x_statement = add_assertibility(x_framework, f"{x_name}_stmt")
+    s_framework = add_framework(None, s_name)
+    s_statement = add_assertibility(s_framework, f"{s_name}_stmt")
 
-    A_child = partial(rel_child, name1=relation_name, name2=d_name, name3=a_name)
+    helper_x, x_b_assertion = _add_attached_statement(
+        x_statement,
+        x_name,
+        lambda assertion: _obj(assertion, b_name),
+        statement_name=f"{x_name}_nested_b",
+    )
+    _helper_x, x_d_assertion = _add_attached_statement(
+        helper_x,
+        x_name,
+        lambda assertion: _obj(assertion, d_name),
+        statement_name=f"{x_name}_nested_d",
+    )
+    _helper_s, s_a_assertion = _add_attached_statement(
+        s_statement,
+        s_name,
+        lambda assertion: _obj(assertion, a_name),
+        statement_name=f"{s_name}_nested_a",
+    )
 
+    x_relation = rel_child(
+        x_statement,
+        relation_name,
+        x_d_assertion,
+        x_b_assertion,
+    )
+    s_relation = rel_child(
+        s_statement,
+        relation_name,
+        x_b_assertion,
+        s_a_assertion,
+    )
 
-    _add_statement(b_name, lambda assertion: A_child(assertion))
-    _add_statement(s_name, lambda assertion: _obj(assertion, a_name))
+    set_assertibility_child(x_statement, x_relation)
+    set_framework_children(x_framework, [x_statement])
+    set_assertibility_child(s_statement, s_relation)
+    set_framework_children(s_framework, [s_statement])
     return b_name
 
 def cone(

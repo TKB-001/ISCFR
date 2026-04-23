@@ -545,6 +545,163 @@ def _framework_descendants(children_by_parent):
     return descendants
 
 
+def _point_in_framework_body(point, framework_name, framework_positions, descendants_by_host, clearance=0.0):
+    framework_circle = framework_positions.get(framework_name)
+    if framework_circle is None:
+        return False
+    if not _point_within_circle(point, framework_circle, clearance):
+        return False
+
+    for descendant_name in descendants_by_host.get(framework_name, ()):
+        descendant_circle = framework_positions.get(descendant_name)
+        if descendant_circle is None:
+            continue
+        if _point_within_circle(point, descendant_circle, clearance):
+            return False
+    return True
+
+
+def _furthest_unblocked_distance_on_ray(angle, max_distance, blocked_circles, clearance):
+    if max_distance <= 0.0:
+        return None
+
+    ux = math.cos(angle)
+    uy = math.sin(angle)
+    intervals = []
+    for bx, by, br in blocked_circles:
+        effective_radius = br + clearance
+        projection = (bx * ux) + (by * uy)
+        offset_sq = (bx * bx) + (by * by) - (projection * projection)
+        radius_sq = effective_radius * effective_radius
+        if offset_sq > radius_sq:
+            continue
+        chord = math.sqrt(max(0.0, radius_sq - offset_sq))
+        start = projection - chord
+        end = projection + chord
+        if end <= 0.0 or start >= max_distance:
+            continue
+        intervals.append((max(0.0, start), min(max_distance, end)))
+
+    if not intervals:
+        return max_distance
+
+    intervals.sort()
+    merged = []
+    for start, end in intervals:
+        if not merged or start > merged[-1][1]:
+            merged.append([start, end])
+            continue
+        merged[-1][1] = max(merged[-1][1], end)
+
+    candidate_distance = max_distance
+    nudge = max(0.5, clearance * 0.5)
+    for start, end in reversed(merged):
+        if candidate_distance > end:
+            break
+        candidate_distance = start - nudge
+
+    if candidate_distance <= 0.0:
+        return None
+    return candidate_distance
+
+
+def _framework_anchor_point(framework_name, other_point, framework_positions, descendants_by_host):
+    framework_circle = framework_positions.get(framework_name)
+    if framework_circle is None:
+        return None
+
+    cx, cy, radius = framework_circle
+    if other_point is None:
+        base_angle = -math.pi / 2.0
+    else:
+        dx = other_point[0] - cx
+        dy = other_point[1] - cy
+        if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+            base_angle = -math.pi / 2.0
+        else:
+            base_angle = math.atan2(dy, dx)
+
+    blocked_circles = []
+    for descendant_name in sorted(descendants_by_host.get(framework_name, ())):
+        descendant_circle = framework_positions.get(descendant_name)
+        if descendant_circle is None:
+            continue
+        blocked_cx, blocked_cy, blocked_radius = descendant_circle
+        blocked_circles.append((blocked_cx - cx, blocked_cy - cy, blocked_radius))
+
+    body_clearance = max(1.5, min(5.0, radius * 0.04))
+    boundary_inset = max(5.0, min(12.0, radius * 0.08))
+    max_distance = max(0.0, radius - boundary_inset)
+    if max_distance <= 0.0:
+        return (cx, cy)
+
+    angle_offsets = [0.0]
+    angle_step = math.pi / 36.0
+    for step in range(1, 37):
+        delta = angle_step * step
+        angle_offsets.append(delta)
+        angle_offsets.append(-delta)
+
+    preferred_distance = max(max_distance * 0.72, radius * 0.45)
+    best_point = None
+    best_score = None
+
+    for offset in angle_offsets:
+        angle = base_angle + offset
+        distance = _furthest_unblocked_distance_on_ray(
+            angle,
+            max_distance,
+            blocked_circles,
+            body_clearance,
+        )
+        if distance is None:
+            continue
+        point = (
+            cx + (distance * math.cos(angle)),
+            cy + (distance * math.sin(angle)),
+        )
+        if not _point_in_framework_body(
+            point,
+            framework_name,
+            framework_positions,
+            descendants_by_host,
+            clearance=body_clearance,
+        ):
+            continue
+        if distance >= preferred_distance:
+            return point
+        score = (distance, -abs(offset))
+        if best_score is None or score > best_score:
+            best_score = score
+            best_point = point
+
+    if best_point is not None:
+        return best_point
+
+    center_point = (cx, cy)
+    if _point_in_framework_body(
+        center_point,
+        framework_name,
+        framework_positions,
+        descendants_by_host,
+        clearance=body_clearance,
+    ):
+        return center_point
+    return center_point
+
+
+def _relation_endpoint_reference(endpoint, object_positions, framework_positions):
+    if endpoint["kind"] == "object":
+        return object_positions.get(endpoint["name"])
+    if endpoint["kind"] == "framework":
+        framework_circle = framework_positions.get(endpoint["name"])
+        if framework_circle is None:
+            return None
+        fx, fy, _ = framework_circle
+        return (fx, fy)
+    return None
+
+
 def _object_font_size(object_name, hosts, framework_positions):
     radii = [framework_positions[host_name][2] for host_name in hosts if host_name in framework_positions]
     if not radii:
@@ -728,6 +885,7 @@ def _build_diagram_svg(tree):
     width = layout["width"]
     height = layout["height"]
     object_positions, object_to_hosts = _place_objects(graph, framework_positions, children_by_parent)
+    descendants_by_host = _framework_descendants(children_by_parent)
 
     note_blocks = []
     max_right = float(width)
@@ -780,22 +938,31 @@ def _build_diagram_svg(tree):
     for relation in graph.relation_edges:
         source = relation["source"]
         target = relation["target"]
-        source_pos = None
-        target_pos = None
-        if source["kind"] == "object":
-            source_pos = object_positions.get(source["name"])
-        elif source["kind"] == "framework":
-            if source["name"] in framework_positions:
-                fx, fy, _ = framework_positions[source["name"]]
-                source_pos = (fx, fy)
-        if target["kind"] == "object":
-            target_pos = object_positions.get(target["name"])
-        elif target["kind"] == "framework":
-            if target["name"] in framework_positions:
-                tx, ty, _ = framework_positions[target["name"]]
-                target_pos = (tx, ty)
+        source_pos = _relation_endpoint_reference(source, object_positions, framework_positions)
+        target_pos = _relation_endpoint_reference(target, object_positions, framework_positions)
         if source_pos is None or target_pos is None:
             continue
+        if target["kind"] == "framework":
+            target_pos = _framework_anchor_point(
+                target["name"],
+                source_pos,
+                framework_positions,
+                descendants_by_host,
+            ) or target_pos
+        if source["kind"] == "framework":
+            source_pos = _framework_anchor_point(
+                source["name"],
+                target_pos,
+                framework_positions,
+                descendants_by_host,
+            ) or source_pos
+            if target["kind"] == "framework":
+                target_pos = _framework_anchor_point(
+                    target["name"],
+                    source_pos,
+                    framework_positions,
+                    descendants_by_host,
+                ) or target_pos
         x1, y1 = source_pos
         x2, y2 = target_pos
         if relation["style"] == "unasserted":
@@ -932,5 +1099,5 @@ def render(tree=Main.tree):
     return final
 
 if __name__ == "__main__":
-    render(examples.limits)
+    render(examples.example_tree_1)
     svg = render_diagram(examples.example_tree_1, output_path="limits.svg")

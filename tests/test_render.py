@@ -14,11 +14,9 @@ def test_render_dhom_output():
     examples = _reload_examples()
     expected = "\n".join(
         [
-            "\u0393_x(B)",
-            "\u0393_x(D)",
             "\u0393_B(s)",
-            "\u0393_B(A#D)",
-            "\u0393_s(A)",
+            "\u0393_x(\u0393_x(D)#\u0393_x(B))",
+            "\u0393_s(\u0393_x(B)#\u0393_s(A))",
         ]
     )
     assert render.render(examples.EXAMPLE_TREES["Dhom"]) == expected
@@ -28,11 +26,9 @@ def test_render_ahom_output():
     examples = _reload_examples()
     expected = "\n".join(
         [
-            "\u0393_x(B)",
-            "\u0393_x(D)",
             "\u0393_B(s)",
-            "\u0393_B(D#A)",
-            "\u0393_s(A)",
+            "\u0393_x(\u0393_s(A)#\u0393_x(B))",
+            "\u0393_s(\u0393_x(B)#\u0393_x(D))",
         ]
     )
     assert render.render(examples.EXAMPLE_TREES["Ahom"]) == expected

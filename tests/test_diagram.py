@@ -64,6 +64,29 @@ def _relation_edges(svg):
     return edges
 
 
+def _relation_segments(svg):
+    root = _parse_svg(svg)
+    segments = []
+    for elem in root.iter():
+        if not elem.tag.endswith("line"):
+            continue
+        label = elem.attrib.get("data-relation")
+        if not label:
+            continue
+        segments.append(
+            {
+                "label": label,
+                "source": elem.attrib.get("data-source"),
+                "target": elem.attrib.get("data-target"),
+                "x1": float(elem.attrib["x1"]),
+                "y1": float(elem.attrib["y1"]),
+                "x2": float(elem.attrib["x2"]),
+                "y2": float(elem.attrib["y2"]),
+            }
+        )
+    return segments
+
+
 def _svg_size(svg):
     root = _parse_svg(svg)
     return float(root.attrib["width"]), float(root.attrib["height"])
@@ -116,8 +139,85 @@ def test_hom_set_relation_direction_changes_between_ahom_and_dhom():
     dhom_svg = render.render_diagram(examples.EXAMPLE_TREES["Dhom"])
     ahom_svg = render.render_diagram(examples.EXAMPLE_TREES["Ahom"])
 
-    assert ("r", "A", "D") in _relation_edges(dhom_svg)
-    assert ("r", "D", "A") in _relation_edges(ahom_svg)
+    dhom_edges = set(_relation_edges(dhom_svg))
+    ahom_edges = set(_relation_edges(ahom_svg))
+
+    assert ("r", "D", "B") in dhom_edges
+    assert ("r", "B", "A") in dhom_edges
+    assert ("r", "A", "B") in ahom_edges
+    assert ("r", "B", "D") in ahom_edges
+
+
+def test_arrow_to_framework_lands_on_target_framework_not_nested_child():
+    examples = _reload_examples()
+    svg = render.render_diagram(examples.EXAMPLE_TREES["Dhom"])
+    frameworks = _framework_geometry(svg)
+    segments = _relation_segments(svg)
+
+    target_segment = next(
+        segment for segment in segments
+        if segment["label"] == "r" and segment["source"] == "D" and segment["target"] == "B"
+    )
+
+    endpoint = (target_segment["x2"], target_segment["y2"])
+    b_circle = frameworks["B"]
+    s_circle = frameworks["s"]
+
+    assert _point_inside(endpoint, b_circle, tolerance=1.5)
+    assert not _point_inside(endpoint, s_circle, tolerance=1e-6)
+
+
+def test_arrow_from_framework_starts_in_framework_body_not_nested_child():
+    examples = _reload_examples()
+    svg = render.render_diagram(examples.EXAMPLE_TREES["Ahom"])
+    frameworks = _framework_geometry(svg)
+    segments = _relation_segments(svg)
+
+    source_segment = next(
+        segment for segment in segments
+        if segment["label"] == "r" and segment["source"] == "B" and segment["target"] == "D"
+    )
+
+    startpoint = (source_segment["x1"], source_segment["y1"])
+    b_circle = frameworks["B"]
+    s_circle = frameworks["s"]
+
+    assert _point_inside(startpoint, b_circle, tolerance=1.5)
+    assert not _point_inside(startpoint, s_circle, tolerance=1e-6)
+
+
+def test_framework_relation_endpoints_avoid_nested_frameworks_across_examples():
+    examples = _reload_examples()
+
+    for tree in (
+        examples.EXAMPLE_TREES["Dhom"],
+        examples.EXAMPLE_TREES["Ahom"],
+        examples.limits,
+    ):
+        svg = render.render_diagram(tree)
+        frameworks = _framework_geometry(svg)
+        segments = _relation_segments(svg)
+        nested_frameworks = {
+            framework_name: [
+                other_name
+                for other_name, other_circle in frameworks.items()
+                if other_name != framework_name and _circle_inside(other_circle, framework_circle)
+            ]
+            for framework_name, framework_circle in frameworks.items()
+        }
+
+        for segment in segments:
+            for endpoint_name, point in (
+                (segment["source"], (segment["x1"], segment["y1"])),
+                (segment["target"], (segment["x2"], segment["y2"])),
+            ):
+                if endpoint_name not in frameworks:
+                    continue
+                assert _point_inside(point, frameworks[endpoint_name], tolerance=1.5)
+                assert not any(
+                    _point_inside(point, frameworks[nested_name], tolerance=1e-6)
+                    for nested_name in nested_frameworks[endpoint_name]
+                )
 
 
 def test_section_break_nodes_are_not_rendered_in_diagram():
