@@ -643,11 +643,17 @@ def build_examples():
         "Dhom": _build_example(Dhom_set),
         "Ahom": _build_example(Ahom_set),
         "Cone": _build_example(cone),
+        "DAlimit": _build_example(limit(hom1 = "D", hom2 = "A")),
+        "ADlimit": _build_example(limit(hom1 = "A", hom2 = "D")),
+        "DDlimit": _build_example(limit(hom1 = "D", hom2 = "D")),
+        "AAlimit": _build_example(limit(hom1 = "A", hom2 = "A")),
+
+
     }
 
 
 EXAMPLE_TREES = build_examples()
-limits = _build_example(limit)
+limits = [EXAMPLE_TREES["DAlimit"],EXAMPLE_TREES["ADlimit"], EXAMPLE_TREES["AAlimit"], EXAMPLE_TREES["DDlimit"]]
 example_tree_1 = EXAMPLE_TREES["Dhom"]
 example_tree_2 = EXAMPLE_TREES["Ahom"]
 example_tree_3 = EXAMPLE_TREES["Cone"]
