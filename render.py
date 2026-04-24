@@ -1100,5 +1100,6 @@ def render(tree=Main.tree):
 
 if __name__ == "__main__":
     for lim in examples.limits:
-        render(lim)        
+        render(lim)   
+        print("_________________")     
     svg = render_diagram(examples.example_tree_1, output_path="limits.svg")
