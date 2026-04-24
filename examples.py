@@ -671,15 +671,38 @@ def build_examples():
     Build and return all example trees.
     Add new examples here to expose them via EXAMPLE_TREES.
     """
+    DAl = partial(limit,hom1 = "D", hom2 = "A")
+    ADl = partial(limit,hom1 = "A", hom2 = "D")
+    DDl = partial(limit,hom1 = "D", hom2 = "D")
+    AAl = partial(limit,hom1 = "A", hom2 = "A")
+
+    cDAl = partial(colimit,hom1 = "D", hom2 = "A")
+    cADl = partial(colimit,hom1 = "A", hom2 = "D")
+    cDDl = partial(colimit,hom1 = "D", hom2 = "D")
+    cAAl = partial(colimit,hom1 = "A", hom2 = "A")
+
     return {
         "Dhom": _build_example(Dhom_set),
         "Ahom": _build_example(Ahom_set),
         "Cone": _build_example(cone),
+        "DAlimit": _build_example(DAl),
+        "ADlimit": _build_example(ADl),
+        "DDlimit": _build_example(DDl),
+        "AAlimit": _build_example(AAl),
+
+        "cDAlimit": _build_example(cDAl),
+        "cADlimit": _build_example(cADl),
+        "cDDlimit": _build_example(cDDl),
+        "cAAlimit": _build_example(cAAl),
+
+
     }
 
 
 EXAMPLE_TREES = build_examples()
-colimits = _build_example(colimit)
+limits = [EXAMPLE_TREES["DAlimit"],EXAMPLE_TREES["ADlimit"], EXAMPLE_TREES["AAlimit"], EXAMPLE_TREES["DDlimit"]]
+colimits = [EXAMPLE_TREES["cDAlimit"],EXAMPLE_TREES["cADlimit"], EXAMPLE_TREES["cAAlimit"], EXAMPLE_TREES["cDDlimit"]]
+
 example_tree_1 = EXAMPLE_TREES["Dhom"]
 example_tree_2 = EXAMPLE_TREES["Ahom"]
 example_tree_3 = EXAMPLE_TREES["Cone"]
