@@ -639,14 +639,19 @@ def build_examples():
     Build and return all example trees.
     Add new examples here to expose them via EXAMPLE_TREES.
     """
+    DAl = partial(limit,hom1 = "D", hom2 = "A")
+    ADl = partial(limit,hom1 = "A", hom2 = "D")
+    DDl = partial(limit,hom1 = "D", hom2 = "D")
+    AAl = partial(limit,hom1 = "A", hom2 = "A")
+
     return {
         "Dhom": _build_example(Dhom_set),
         "Ahom": _build_example(Ahom_set),
         "Cone": _build_example(cone),
-        "DAlimit": _build_example(limit(hom1 = "D", hom2 = "A")),
-        "ADlimit": _build_example(limit(hom1 = "A", hom2 = "D")),
-        "DDlimit": _build_example(limit(hom1 = "D", hom2 = "D")),
-        "AAlimit": _build_example(limit(hom1 = "A", hom2 = "A")),
+        "DAlimit": _build_example(DAl),
+        "ADlimit": _build_example(ADl),
+        "DDlimit": _build_example(DDl),
+        "AAlimit": _build_example(AAl),
 
 
     }
