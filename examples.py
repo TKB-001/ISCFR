@@ -721,6 +721,10 @@ EXAMPLE_TREES = build_examples()
 limits = [EXAMPLE_TREES["DAlimit"],EXAMPLE_TREES["ADlimit"], EXAMPLE_TREES["AAlimit"], EXAMPLE_TREES["DDlimit"]]
 colimits = [EXAMPLE_TREES["cDAlimit"],EXAMPLE_TREES["cADlimit"], EXAMPLE_TREES["cAAlimit"], EXAMPLE_TREES["cDDlimit"]]
 
+left_adjoints = [EXAMPLE_TREES["lDAadjoint"],EXAMPLE_TREES["lADadjoint"], EXAMPLE_TREES["lDDadjoint"], EXAMPLE_TREES["lAAadjoint"]]
+right_adjoints = [EXAMPLE_TREES["rDAadjoint"],EXAMPLE_TREES["rADadjoint"], EXAMPLE_TREES["rDDadjoint"], EXAMPLE_TREES["rAAadjoint"]]
+
+
 example_tree_1 = EXAMPLE_TREES["Dhom"]
 example_tree_2 = EXAMPLE_TREES["Ahom"]
 example_tree_3 = EXAMPLE_TREES["Cone"]

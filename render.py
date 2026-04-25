@@ -1105,6 +1105,12 @@ if __name__ == "__main__":
     for colim in examples.colimits:
         render(colim)   
         print("_________________") """
-    render(examples.example_tree_2)
+    
+    """for adj in examples.left_adjoints:
+    render(adj)   
+    print("_________________")""" 
+    for adj in examples.right_adjoints:
+        render(adj)   
+        print("_________________") 
 
     svg = render_diagram(examples.example_tree_1, output_path="limits.svg")
