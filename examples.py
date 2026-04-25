@@ -603,12 +603,12 @@ def cone(
     _add_statement(h_name, lambda assertion: Cone_child(assertion))
     return j_name
 
-def limit(hom1 = "D", hom2 = "A"):
-    # hom1 and hom2 decide if Ahoms or Dhoms get used
+def _build_limit_colimit(kind, hom1 = "D", hom2 = "A", B_name1 = "B", B_name2 = "B", A2_name = "a", D2_name = "d") :
     hom1_builder = Dhom_set if hom1 == "D" else Ahom_set
     hom2_builder = Dhom_set if hom2 == "D" else Ahom_set
+    factor_builder = Dhom_set if kind == "limit" else Ahom_set
 
-    def _build_limit_sequence():
+    def _build_sequence():
         # foundational cones
         cone()
         add_section_break()
@@ -617,59 +617,59 @@ def limit(hom1 = "D", hom2 = "A"):
         add_section_break()
 
         # hom-sets
-        J_B = hom1_builder(x_name="j")
+        J_B = hom1_builder(x_name="j", b_name = B_name1)
         add_section_break()
 
-        K_B = hom2_builder(x_name="k")
+        K_B = hom2_builder(x_name="k", b_name = B_name2, a_name= A2_name, d_name = D2_name)
         add_section_break()
 
         # factor property
-        Dhom_set(x_name=K_B, s_name=J_B)
+        factor_builder(x_name=K_B, s_name=J_B)
 
     _trees_by_name, merged = build_examples_shared(
-        [("limit_sequence", _build_limit_sequence)],
+        [("limit_sequence", _build_sequence)],
         warn=False,
         warn_cross_tree=False,
         warn_intra_tree=False,
     )
     tree.extend(merged)
     return merged
-def colimit(hom1 = "A", hom2 = "D"):
-    # hom1 and hom2 decide if Ahoms or Dhoms get used
-    hom1_builder = Dhom_set if hom1 == "D" else Ahom_set
-    hom2_builder = Dhom_set if hom2 == "D" else Ahom_set
 
-    def _build_limit_sequence():
-        # foundational cones
-        cone()
+
+def limit(hom1 = "D", hom2 = "A", Bo_name1 = "B", Bo_name2 = "B", a2_name = "a", d2_name = "d"):
+    return _build_limit_colimit("limit", hom1, hom2, B_name1 = Bo_name1, B_name2 =Bo_name2, A2_name = a2_name, D2_name = d2_name)
+
+def colimit(hom1 = "A", hom2 = "D", Bo_name1 = "B", Bo_name2 = "B", a2_name = "g", d2_name = "d"):
+    return _build_limit_colimit("colimit", hom1, hom2, B_name1 = Bo_name1, B_name2 =Bo_name2, A2_name = a2_name, D2_name = d2_name)
+
+def adjoint(kind, hom1 = "D", hom2 = "A", so_name = "σ", xo_name = "M"):
+
+    base = limit if kind == "R" else colimit
+    def _build_sequence():
+        base(hom1, hom2, Bo_name2 = so_name, a2_name = xo_name) if kind == "R" else base(hom1, hom2, Bo_name2 = so_name, d2_name = xo_name)
         add_section_break()
 
-        cone(j_name="k")
-        add_section_break()
+        Dhom_set(s_name = so_name, x_name = xo_name)
 
-        # hom-sets
-        J_B = hom1_builder(x_name="j")
-        add_section_break()
 
-        K_B = hom2_builder(x_name="k")
-        add_section_break()
-
-        # factor property
-        Ahom_set(x_name=K_B, s_name=J_B)
-
+    
     _trees_by_name, merged = build_examples_shared(
-        [("limit_sequence", _build_limit_sequence)],
+        [("adjoint_sequence", _build_sequence)],
         warn=False,
         warn_cross_tree=False,
         warn_intra_tree=False,
     )
     tree.extend(merged)
     return merged
+
+
+
+    
 
 def build_examples():
     """
     Build and return all example trees.
-    Add new examples here to expose them via EXAMPLE_TREES.
+    Add examples here to expose them via EXAMPLE_TREES.
     """
     DAl = partial(limit,hom1 = "D", hom2 = "A")
     ADl = partial(limit,hom1 = "A", hom2 = "D")
@@ -681,10 +681,20 @@ def build_examples():
     cDDl = partial(colimit,hom1 = "D", hom2 = "D")
     cAAl = partial(colimit,hom1 = "A", hom2 = "A")
 
+    adjlDA = partial(adjoint,hom1 = "D", hom2 = "A", kind = "L")
+    adjlAD = partial(adjoint,hom1 = "A", hom2 = "D", kind = "L")
+    adjlDD = partial(adjoint,hom1 = "D", hom2 = "D", kind = "L")
+    adjlAA = partial(adjoint,hom1 = "A", hom2 = "A", kind = "L")
+
+    adjrDA = partial(adjoint,hom1 = "D", hom2 = "A", kind = "R")
+    adjrAD = partial(adjoint,hom1 = "A", hom2 = "D", kind = "R")
+    adjrDD = partial(adjoint,hom1 = "D", hom2 = "D", kind = "R")
+    adjrAA = partial(adjoint,hom1 = "A", hom2 = "A", kind = "R")
     return {
         "Dhom": _build_example(Dhom_set),
         "Ahom": _build_example(Ahom_set),
         "Cone": _build_example(cone),
+
         "DAlimit": _build_example(DAl),
         "ADlimit": _build_example(ADl),
         "DDlimit": _build_example(DDl),
@@ -695,7 +705,15 @@ def build_examples():
         "cDDlimit": _build_example(cDDl),
         "cAAlimit": _build_example(cAAl),
 
+        "lDAadjoint": _build_example(adjlDA),
+        "lADadjoint": _build_example(adjlAD),
+        "lDDadjoint": _build_example(adjlDD),
+        "lAAadjoint": _build_example(adjlAA),
 
+        "rDAadjoint": _build_example(adjrDA),
+        "rADadjoint": _build_example(adjrAD),
+        "rDDadjoint": _build_example(adjrDD),
+        "rAAadjoint": _build_example(adjrAA),
     }
 
 

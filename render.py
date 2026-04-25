@@ -1101,9 +1101,10 @@ def render(tree=Main.tree):
 if __name__ == "__main__":
     """for lim in examples.limits:
         render(lim)   
-        print("_________________") """
+        print("_________________") 
     for colim in examples.colimits:
         render(colim)   
-        print("_________________") 
- 
+        print("_________________") """
+    render(examples.example_tree_2)
+
     svg = render_diagram(examples.example_tree_1, output_path="limits.svg")
