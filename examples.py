@@ -636,10 +636,10 @@ def _build_limit_colimit(kind, hom1 = "D", hom2 = "A", B_name1 = "B", B_name2 = 
     return merged
 
 
-def limit(hom1 = "D", hom2 = "A", Bo_name1 = "B", Bo_name2 = "B", a2_name = "a", d2_name = "d"):
+def limit(hom1 = "D", hom2 = "A", Bo_name1 = "B", Bo_name2 = "B", a2_name = "A", d2_name = "D"):
     return _build_limit_colimit("limit", hom1, hom2, B_name1 = Bo_name1, B_name2 =Bo_name2, A2_name = a2_name, D2_name = d2_name)
 
-def colimit(hom1 = "A", hom2 = "D", Bo_name1 = "B", Bo_name2 = "B", a2_name = "g", d2_name = "d"):
+def colimit(hom1 = "A", hom2 = "D", Bo_name1 = "B", Bo_name2 = "B", a2_name = "A", d2_name = "D"):
     return _build_limit_colimit("colimit", hom1, hom2, B_name1 = Bo_name1, B_name2 =Bo_name2, A2_name = a2_name, D2_name = d2_name)
 
 def adjoint(kind, hom1 = "D", hom2 = "A", so_name = "σ", xo_name = "M"):

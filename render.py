@@ -1113,4 +1113,4 @@ if __name__ == "__main__":
         render(adj)   
         print("_________________") 
 
-    svg = render_diagram(examples.example_tree_1, output_path="limits.svg")
+    svg = render_diagram(examples.left_adjoints[3], output_path="limits.svg")
