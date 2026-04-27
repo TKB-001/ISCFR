@@ -413,3 +413,23 @@ def test_render_diagram_writes_svg_to_disk():
     finally:
         if output_path.exists():
             output_path.unlink()
+
+
+def test_shared_objects_fall_back_inside_real_hosts_when_host_circles_do_not_overlap():
+    examples = _reload_examples()
+    svg = render.render_diagram(examples.right_adjoints[0])
+    frameworks = _framework_geometry(svg)
+    objects = _object_positions(svg)
+
+    for object_name, (ox, oy, hosts) in objects.items():
+        host_names = [host_name for host_name in hosts.split(",") if host_name]
+        if not host_names:
+            continue
+        assert any(
+            _point_inside((ox, oy), frameworks[host_name], tolerance=1.5)
+            for host_name in host_names
+            if host_name in frameworks
+        ), object_name
+
+    assert _point_inside(objects["f"][:2], frameworks["a"], tolerance=1.5)
+    assert _point_inside(objects["N"][:2], frameworks["i"], tolerance=1.5)

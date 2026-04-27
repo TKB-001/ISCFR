@@ -394,6 +394,106 @@ def _framework_tree_depth(root_name, children_by_parent):
     return 1 + max(_framework_tree_depth(child_name, children_by_parent) for child_name in children)
 
 
+def _framework_root_map(roots, parent_of):
+    root_of = {root_name: root_name for root_name in roots}
+    pending = True
+    while pending:
+        pending = False
+        for framework_name, parent_name in parent_of.items():
+            if framework_name in root_of:
+                continue
+            root_name = root_of.get(parent_name)
+            if root_name is None:
+                continue
+            root_of[framework_name] = root_name
+            pending = True
+    return root_of
+
+
+def _framework_subtree_names(root_name, children_by_parent):
+    names = {root_name}
+    stack = list(children_by_parent.get(root_name, []))
+    while stack:
+        framework_name = stack.pop()
+        if framework_name in names:
+            continue
+        names.add(framework_name)
+        stack.extend(children_by_parent.get(framework_name, []))
+    return names
+
+
+def _root_layout_components(graph, roots, parent_of):
+    root_of = _framework_root_map(roots, parent_of)
+    link_weights = defaultdict(int)
+
+    def _root_name_for_framework(framework_name):
+        return root_of.get(framework_name, framework_name)
+
+    def _add_root_link(left_name, right_name, weight):
+        if left_name == right_name:
+            return
+        pair = tuple(sorted((left_name, right_name)))
+        link_weights[pair] += weight
+
+    for host_names in graph.object_hosts.values():
+        root_names = sorted({_root_name_for_framework(host_name) for host_name in host_names})
+        for idx, left_name in enumerate(root_names):
+            for right_name in root_names[idx + 1:]:
+                _add_root_link(left_name, right_name, 4)
+
+    for object_name, relation_hosts in graph.object_relation_hosts.items():
+        relation_roots = {_root_name_for_framework(host_name) for host_name in relation_hosts}
+        direct_hosts = graph.object_hosts.get(object_name, ())
+        if direct_hosts:
+            direct_roots = {_root_name_for_framework(host_name) for host_name in direct_hosts}
+            for left_name in direct_roots:
+                for right_name in relation_roots:
+                    _add_root_link(left_name, right_name, 2)
+        else:
+            relation_roots = sorted(relation_roots)
+            for idx, left_name in enumerate(relation_roots):
+                for right_name in relation_roots[idx + 1:]:
+                    _add_root_link(left_name, right_name, 2)
+
+    for relation in graph.relation_edges:
+        host_root = _root_name_for_framework(relation["host"])
+        endpoint_roots = set()
+        for endpoint in (relation["source"], relation["target"]):
+            if endpoint["kind"] == "framework":
+                endpoint_roots.add(_root_name_for_framework(endpoint["name"]))
+                continue
+            direct_hosts = graph.object_hosts.get(endpoint["name"], ())
+            relation_hosts = graph.object_relation_hosts.get(endpoint["name"], ())
+            candidate_hosts = direct_hosts if direct_hosts else relation_hosts
+            endpoint_roots.update(_root_name_for_framework(host_name) for host_name in candidate_hosts)
+        for endpoint_root in endpoint_roots:
+            _add_root_link(host_root, endpoint_root, 2)
+
+    adjacency = defaultdict(set)
+    for left_name, right_name in link_weights:
+        adjacency[left_name].add(right_name)
+        adjacency[right_name].add(left_name)
+
+    components = []
+    seen = set()
+    for root_name in roots:
+        if root_name in seen:
+            continue
+        stack = [root_name]
+        component = []
+        while stack:
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            component.append(current)
+            neighbors = sorted(adjacency.get(current, ()), reverse=True)
+            stack.extend(neighbors)
+        components.append(component)
+
+    return components, link_weights, root_of
+
+
 def _children_share_objects(child_frameworks, object_hosts):
     child_set = set(child_frameworks)
     for host_names in object_hosts.values():
@@ -446,70 +546,238 @@ def _layout_framework_recursive(framework_name, cx, cy, radius, children_by_pare
         )
 
 
-def _layout_framework_positions(graph, roots, children_by_parent):
-    if not roots:
-        return {}
-
-    max_depth = max(_framework_tree_depth(root_name, children_by_parent) for root_name in roots)
+def _root_radius_by_name(graph, roots, children_by_parent):
     host_object_counts = defaultdict(int)
+    relation_object_counts = defaultdict(int)
     for object_name, host_names in graph.object_hosts.items():
         for host_name in host_names:
             host_object_counts[host_name] += 1
     for object_name, host_names in graph.object_relation_hosts.items():
-        if object_name in graph.object_hosts:
-            continue
+        direct_hosts = set(graph.object_hosts.get(object_name, ()))
         for host_name in host_names:
-            host_object_counts[host_name] += 1
-    max_objects = max(host_object_counts.values(), default=0)
-    max_child_count = max((len(children_by_parent.get(name, [])) for name in graph.frameworks), default=0)
-    max_note_count = max((len(notes) for notes in graph.unassertibility_notes.values()), default=0)
+            if host_name in direct_hosts:
+                continue
+            relation_object_counts[host_name] += 1
 
-    root_radius = max(
-        140.0,
-        76.0 + (max_depth * 34.0) + (max_objects * 10.0) + (max_child_count * 7.0) + (max_note_count * 6.0),
+    root_radii = {}
+    for root_name in roots:
+        subtree_names = _framework_subtree_names(root_name, children_by_parent)
+        subtree_depth = _framework_tree_depth(root_name, children_by_parent)
+        max_objects = max(
+            (
+                host_object_counts.get(name, 0) + relation_object_counts.get(name, 0)
+                for name in subtree_names
+            ),
+            default=0,
+        )
+        max_child_count = max((len(children_by_parent.get(name, [])) for name in subtree_names), default=0)
+        max_note_count = max((len(graph.unassertibility_notes.get(name, [])) for name in subtree_names), default=0)
+        root_radii[root_name] = max(
+            112.0,
+            76.0 + (subtree_depth * 32.0) + (max_objects * 10.0) + (max_child_count * 8.0) + (max_note_count * 8.0),
+        )
+    return root_radii
+
+
+def _ordered_roots_within_component(component_roots, root_radii, link_weights):
+    if len(component_roots) <= 1:
+        return list(component_roots)
+
+    def _component_degree(root_name):
+        total = 0
+        for other_name in component_roots:
+            if other_name == root_name:
+                continue
+            total += link_weights.get(tuple(sorted((root_name, other_name))), 0)
+        return total
+
+    anchor = max(
+        component_roots,
+        key=lambda name: (_component_degree(name), root_radii.get(name, 0.0), name),
     )
-    root_diameter = root_radius * 2.0
-    horizontal_gap = max(100.0, root_radius * 0.60)
-    vertical_gap = max(90.0, root_radius * 0.50)
+    remaining = set(component_roots)
+    remaining.remove(anchor)
+    ordered = [anchor]
+
+    while remaining:
+        previous = ordered[-1]
+        next_root = max(
+            remaining,
+            key=lambda name: (
+                link_weights.get(tuple(sorted((previous, name))), 0),
+                _component_degree(name),
+                root_radii.get(name, 0.0),
+                name,
+            ),
+        )
+        ordered.append(next_root)
+        remaining.remove(next_root)
+
+    return ordered
+
+
+def _layout_framework_positions(graph, roots, parent_of, children_by_parent):
+    if not roots:
+        return {}
+
     margin = 30.0
-    max_cols = 3
-    cols = min(max_cols, len(roots))
-    rows = (len(roots) + cols - 1) // cols
+    root_radii = _root_radius_by_name(graph, roots, children_by_parent)
+    components, link_weights, _root_of = _root_layout_components(graph, roots, parent_of)
+    if not components:
+        components = [list(roots)]
 
     positions = {}
-    for idx, root_name in enumerate(roots):
-        row = idx // cols
-        col = idx % cols
-        cx = margin + root_radius + col * (root_diameter + horizontal_gap)
-        cy = margin + root_radius + row * (root_diameter + vertical_gap)
-        _layout_framework_recursive(root_name, cx, cy, root_radius, children_by_parent, graph, positions)
+    component_rows = []
+    for component_roots in components:
+        ordered_roots = _ordered_roots_within_component(component_roots, root_radii, link_weights)
+        component_rows.append(ordered_roots)
 
-    width = int(margin * 2 + cols * root_diameter + (cols - 1) * horizontal_gap)
-    height = int(margin * 2 + rows * root_diameter + (rows - 1) * vertical_gap)
+    y_cursor = margin
+    max_right = margin
+    last_row_gap = 0.0
+    for ordered_roots in component_rows:
+        x_cursor = margin
+        row_height = 0.0
+        previous_root = None
+        for root_name in ordered_roots:
+            radius = root_radii[root_name]
+            if previous_root is not None:
+                previous_radius = root_radii[previous_root]
+                pair = tuple(sorted((previous_root, root_name)))
+                link_weight = link_weights.get(pair, 0)
+                if link_weight >= 4:
+                    gap = -min(previous_radius, radius) * 0.18
+                elif link_weight > 0:
+                    gap = max(12.0, min(previous_radius, radius) * 0.06)
+                else:
+                    gap = max(36.0, min(previous_radius, radius) * 0.20)
+                x_cursor += gap
+            cx = x_cursor + radius
+            cy = y_cursor + radius
+            _layout_framework_recursive(root_name, cx, cy, radius, children_by_parent, graph, positions)
+            x_cursor += radius * 2.0
+            row_height = max(row_height, radius * 2.0)
+            max_right = max(max_right, x_cursor)
+            previous_root = root_name
+        last_row_gap = max(48.0, row_height * 0.18)
+        y_cursor += row_height + last_row_gap
+
+    width = int(math.ceil(max_right + margin))
+    height = int(math.ceil(y_cursor - last_row_gap + margin)) if component_rows else int(margin * 2)
     return {"positions": positions, "width": width, "height": height}
 
 
-def _shared_object_position(host_names, framework_positions):
+def _circle_intersection_points(left_circle, right_circle):
+    x1, y1, r1 = left_circle
+    x2, y2, r2 = right_circle
+    dx = x2 - x1
+    dy = y2 - y1
+    distance = math.hypot(dx, dy)
+    if distance < 1e-6 or distance > (r1 + r2) or distance < abs(r1 - r2):
+        return []
+
+    a = ((r1 * r1) - (r2 * r2) + (distance * distance)) / (2.0 * distance)
+    h_sq = (r1 * r1) - (a * a)
+    if h_sq < 0.0:
+        if h_sq > -1e-6:
+            h_sq = 0.0
+        else:
+            return []
+    h = math.sqrt(h_sq)
+    xm = x1 + (a * dx / distance)
+    ym = y1 + (a * dy / distance)
+    rx = -dy * (h / distance)
+    ry = dx * (h / distance)
+    return [
+        (xm + rx, ym + ry),
+        (xm - rx, ym - ry),
+    ]
+
+
+def _shared_object_position(object_name, host_names, framework_positions, descendants_by_host):
     host_circles = [framework_positions[name] for name in host_names if name in framework_positions]
     if not host_circles:
         return None
     if len(host_circles) == 1:
         cx, cy, _ = host_circles[0]
         return (cx, cy)
-    if len(host_circles) == 2:
-        (x1, y1, r1), (x2, y2, r2) = host_circles
-        dx = x2 - x1
-        dy = y2 - y1
-        distance = math.hypot(dx, dy)
-        if distance < 1e-6:
-            return (x1, y1)
-        if distance + min(r1, r2) <= max(r1, r2):
-            return (x1, y1) if r1 <= r2 else (x2, y2)
-        return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
+    clearance = min(
+        _object_clearance(object_name, framework_positions[host_name][2])
+        for host_name in host_names
+        if host_name in framework_positions
+    )
+    candidate_points = []
     avg_x = sum(circle[0] for circle in host_circles) / len(host_circles)
     avg_y = sum(circle[1] for circle in host_circles) / len(host_circles)
-    return (avg_x, avg_y)
+    candidate_points.append((avg_x, avg_y))
+    candidate_points.extend((circle[0], circle[1]) for circle in host_circles)
+
+    for idx, left_name in enumerate(host_names):
+        left_circle = framework_positions.get(left_name)
+        if left_circle is None:
+            continue
+        for right_name in host_names[idx + 1:]:
+            right_circle = framework_positions.get(right_name)
+            if right_circle is None:
+                continue
+            candidate_points.extend(_circle_intersection_points(left_circle, right_circle))
+            candidate_points.append(
+                ((left_circle[0] + right_circle[0]) / 2.0, (left_circle[1] + right_circle[1]) / 2.0)
+            )
+
+    best_point = None
+    best_score = None
+    for point in candidate_points:
+        matched = 0
+        min_margin = float("inf")
+        total_distance = 0.0
+        for host_name in host_names:
+            circle = framework_positions.get(host_name)
+            if circle is None:
+                continue
+            cx, cy, radius = circle
+            total_distance += math.hypot(point[0] - cx, point[1] - cy)
+            if not _point_in_framework_body(
+                point,
+                host_name,
+                framework_positions,
+                descendants_by_host,
+                clearance=clearance,
+            ):
+                continue
+            matched += 1
+            min_margin = min(min_margin, radius - math.hypot(point[0] - cx, point[1] - cy) - clearance)
+        score = (matched, min_margin, -total_distance)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_point = point
+
+    if best_score is not None and best_score[0] == len(host_names):
+        return best_point
+
+    fallback_host = sorted(
+        (host_name for host_name in host_names if host_name in framework_positions),
+        key=lambda name: (-framework_positions[name][2], name),
+    )[0]
+    other_circles = [framework_positions[name] for name in host_names if name != fallback_host and name in framework_positions]
+    reference_point = None
+    if other_circles:
+        reference_point = (
+            sum(circle[0] for circle in other_circles) / len(other_circles),
+            sum(circle[1] for circle in other_circles) / len(other_circles),
+        )
+    anchor_point = _framework_anchor_point(
+        fallback_host,
+        reference_point,
+        framework_positions,
+        descendants_by_host,
+    )
+    if anchor_point is None:
+        cx, cy, _ = framework_positions[fallback_host]
+        return (cx, cy)
+    cx, cy, _ = framework_positions[fallback_host]
+    return ((cx + anchor_point[0]) / 2.0, (cy + anchor_point[1]) / 2.0)
 
 
 def _circle_padding_for_label(radius):
@@ -815,7 +1083,12 @@ def _place_objects(graph, framework_positions, children_by_parent):
 
     shared_cluster_offsets = defaultdict(int)
     for object_name, host_names in shared_objects:
-        shared_position = _shared_object_position(host_names, framework_positions)
+        shared_position = _shared_object_position(
+            object_name,
+            host_names,
+            framework_positions,
+            descendants_by_host,
+        )
         if shared_position is not None:
             cluster_key = tuple(host_names)
             offset_index = shared_cluster_offsets[cluster_key]
@@ -880,7 +1153,7 @@ def _build_diagram_svg(tree):
             "</svg>"
         )
 
-    layout = _layout_framework_positions(graph, roots, children_by_parent)
+    layout = _layout_framework_positions(graph, roots, parent_of, children_by_parent)
     framework_positions = layout["positions"]
     width = layout["width"]
     height = layout["height"]
@@ -1113,4 +1386,4 @@ if __name__ == "__main__":
         render(adj)   
         print("_________________") 
 
-    svg = render_diagram(examples.left_adjoints[3], output_path="limits.svg")
+    svg = render_diagram(examples.right_adjoints[0], output_path="limits.svg")
