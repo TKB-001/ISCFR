@@ -351,6 +351,7 @@ def _build_primary_framework_tree(graph):
         roots = [sorted(graph.frameworks)[0]]
 
     parent_of = {}
+    all_parents = defaultdict(set)  # NEW: Track ALL parents, not just one
     visited = set(roots)
     queue = list(roots)
     while queue:
@@ -359,6 +360,7 @@ def _build_primary_framework_tree(graph):
             if child in visited:
                 continue
             parent_of[child] = parent
+            all_parents[child].add(parent)  # NEW: Record primary parent
             visited.add(child)
             queue.append(child)
 
@@ -376,6 +378,7 @@ def _build_primary_framework_tree(graph):
             visited.add(framework_name)
         else:
             parent_of[framework_name] = chosen_parent
+            all_parents[framework_name].add(chosen_parent)  # NEW: Record primary parent
             visited.add(framework_name)
 
     primary_children = defaultdict(list)
@@ -384,7 +387,10 @@ def _build_primary_framework_tree(graph):
     for parent_name in primary_children:
         primary_children[parent_name].sort()
 
-    return roots, parent_of, primary_children
+    for framework_name, parent_names in graph.framework_parent_candidates.items():
+        all_parents[framework_name].update(parent_names)
+
+    return roots, parent_of, primary_children, all_parents
 
 
 def _framework_tree_depth(root_name, children_by_parent):
@@ -546,6 +552,36 @@ def _layout_framework_recursive(framework_name, cx, cy, radius, children_by_pare
         )
 
 
+def _detect_object_density(object_names, host_radius):
+    """
+    Detect object density to enable adaptive placement strategies.
+    
+    Returns: "sparse" | "moderate" | "dense" | "critical"
+    - Helps avoid golden spiral failures at high densities
+    """
+    if not object_names:
+        return "sparse"
+    
+    # Estimate area available per object
+    available_area = math.pi * (host_radius ** 2) * 0.7
+    area_per_object = available_area / len(object_names)
+    
+    # Calculate required area based on typical object size
+    avg_clearance = 20.0  # typical object clearance
+    required_area_per_object = (2 * avg_clearance) ** 2
+    
+    density_ratio = required_area_per_object / area_per_object if area_per_object > 0 else float('inf')
+    
+    if density_ratio < 0.3:
+        return "sparse"
+    elif density_ratio < 0.6:
+        return "moderate"
+    elif density_ratio < 1.2:
+        return "dense"
+    else:
+        return "critical"
+
+
 def _root_radius_by_name(graph, roots, children_by_parent):
     host_object_counts = defaultdict(int)
     relation_object_counts = defaultdict(int)
@@ -572,9 +608,14 @@ def _root_radius_by_name(graph, roots, children_by_parent):
         )
         max_child_count = max((len(children_by_parent.get(name, [])) for name in subtree_names), default=0)
         max_note_count = max((len(graph.unassertibility_notes.get(name, [])) for name in subtree_names), default=0)
+        
+        # IMPROVED: Better scaling for extreme hierarchies
+        # Use exponential scaling for depth to handle deep trees better
+        depth_factor = min(subtree_depth * 32.0, 48.0 + math.log(max(1, subtree_depth)) * 24.0)
+        
         root_radii[root_name] = max(
             112.0,
-            76.0 + (subtree_depth * 32.0) + (max_objects * 10.0) + (max_child_count * 8.0) + (max_note_count * 8.0),
+            76.0 + depth_factor + (max_objects * 10.0) + (max_child_count * 8.0) + (max_note_count * 8.0),
         )
     return root_radii
 
@@ -997,53 +1038,131 @@ def _find_host_object_positions(host_name, object_names, framework_positions, bl
 
     positions = {}
     placed = []
-    ring_step = max(18.0, radius * 0.14)
-    max_ring_radius = max(18.0, radius - max(20.0, radius * 0.14))
-    min_ring_radius = max(12.0, radius * 0.20)
-    ring_radii = []
-    ring_radius = max_ring_radius
-    while ring_radius >= min_ring_radius:
-        ring_radii.append(ring_radius)
-        ring_radius -= ring_step
-    if not ring_radii:
-        ring_radii = [max(radius * 0.45, 12.0)]
-
-    angle_count = max(18, len(object_names) * 10)
-    golden_angle = math.pi * (3.0 - math.sqrt(5.0))
-
-    for object_name in sorted(object_names):
-        clearance = _object_clearance(object_name, radius)
-        point = None
-        for ring_index, ring_radius in enumerate(ring_radii):
-            for angle_index in range(angle_count):
-                angle = ((angle_index * golden_angle) + (ring_index * 0.31)) % (2.0 * math.pi)
+    
+    density = _detect_object_density(object_names, radius)
+    
+    if density == "sparse":
+        # Use traditional golden spiral for sparse objects
+        angle_count = max(18, len(object_names) * 10)
+        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+        ring_step = max(18.0, radius * 0.14)
+        max_ring_radius = max(18.0, radius - max(20.0, radius * 0.14))
+        min_ring_radius = max(12.0, radius * 0.20)
+        ring_radii = []
+        ring_radius = max_ring_radius
+        while ring_radius >= min_ring_radius:
+            ring_radii.append(ring_radius)
+            ring_radius -= ring_step
+        if not ring_radii:
+            ring_radii = [max(radius * 0.45, 12.0)]
+        
+        for object_name in sorted(object_names):
+            clearance = _object_clearance(object_name, radius)
+            point = None
+            for ring_index, ring_radius in enumerate(ring_radii):
+                for angle_index in range(angle_count):
+                    angle = ((angle_index * golden_angle) + (ring_index * 0.31)) % (2.0 * math.pi)
+                    candidate = (
+                        cx + ring_radius * math.cos(angle),
+                        cy + ring_radius * math.sin(angle),
+                    )
+                    if not _point_within_circle(candidate, host_circle, clearance):
+                        continue
+                    if any(
+                        _point_within_circle(candidate, blocked_circle, clearance)
+                        for blocked_circle in blocked_circles
+                    ):
+                        continue
+                    if any(
+                        math.hypot(candidate[0] - other_point[0], candidate[1] - other_point[1]) < (clearance + other_clearance)
+                        for other_point, other_clearance in placed
+                    ):
+                        continue
+                    point = candidate
+                    break
+                if point is not None:
+                    break
+            if point is None:
+                if blocked_circles:
+                    point = (cx, cy - max(0.0, radius * 0.55))
+                else:
+                    point = (cx, cy + (radius * 0.35))
+            positions[object_name] = point
+            placed.append((point, clearance))
+    
+    elif density in ("moderate", "dense", "critical"):
+        # IMPROVED: Multi-layer radial grid for dense/critical clusters
+        # This avoids golden spiral clustering issues
+        num_objects = len(object_names)
+        num_layers = max(2, int(math.ceil(math.sqrt(num_objects / 2.0))))
+        layer_step = (radius * 0.65) / num_layers
+        
+        object_idx = 0
+        for layer in range(num_layers):
+            layer_radius = (radius * 0.15) + (layer * layer_step)
+            # Adaptive angle count per layer
+            angles_in_layer = max(3, int(math.ceil(2.0 * math.pi * layer_radius / 24.0)))
+            
+            for angle_idx in range(angles_in_layer):
+                if object_idx >= num_objects:
+                    break
+                object_name = sorted(object_names)[object_idx]
+                clearance = _object_clearance(object_name, radius)
+                
+                angle = (2.0 * math.pi * angle_idx) / angles_in_layer
                 candidate = (
-                    cx + ring_radius * math.cos(angle),
-                    cy + ring_radius * math.sin(angle),
+                    cx + layer_radius * math.cos(angle),
+                    cy + layer_radius * math.sin(angle),
                 )
-                if not _point_within_circle(candidate, host_circle, clearance):
-                    continue
-                if any(
-                    _point_within_circle(candidate, blocked_circle, clearance)
-                    for blocked_circle in blocked_circles
-                ):
-                    continue
-                if any(
-                    math.hypot(candidate[0] - other_point[0], candidate[1] - other_point[1]) < (clearance + other_clearance)
-                    for other_point, other_clearance in placed
-                ):
-                    continue
-                point = candidate
-                break
-            if point is not None:
-                break
-        if point is None:
-            if blocked_circles:
-                point = (cx, cy - max(0.0, radius * 0.55))
-            else:
-                point = (cx, cy + (radius * 0.35))
-        positions[object_name] = point
-        placed.append((point, clearance))
+                
+                # Try candidate and nearby positions
+                found = False
+                for offset in [0.0, math.pi/6, -math.pi/6, math.pi/3, -math.pi/3]:
+                    test_angle = angle + offset
+                    test_point = (
+                        cx + layer_radius * math.cos(test_angle),
+                        cy + layer_radius * math.sin(test_angle),
+                    )
+                    
+                    if not _point_within_circle(test_point, host_circle, clearance):
+                        continue
+                    if any(
+                        _point_within_circle(test_point, blocked_circle, clearance)
+                        for blocked_circle in blocked_circles
+                    ):
+                        continue
+                    if any(
+                        math.hypot(test_point[0] - p[0], test_point[1] - p[1]) < (clearance + c)
+                        for p, c in placed
+                    ):
+                        continue
+                    
+                    positions[object_name] = test_point
+                    placed.append((test_point, clearance))
+                    found = True
+                    break
+                
+                if not found:
+                    # Fallback: place near center or edge
+                    fallback = (cx, cy + (radius * 0.3 * (1 - layer / num_layers)))
+                    positions[object_name] = fallback
+                    placed.append((fallback, clearance))
+                
+                object_idx += 1
+        
+        # Place remaining objects
+        for object_name in sorted(object_names):
+            if object_name not in positions:
+                clearance = _object_clearance(object_name, radius)
+                # Critical overflow: place in circular overflow zone
+                overflow_idx = len([o for o in sorted(object_names) if o not in positions])
+                overflow_angle = (2.0 * math.pi * overflow_idx) / max(3, num_objects - len(positions))
+                overflow_pos = (
+                    cx + (radius * 0.75) * math.cos(overflow_angle),
+                    cy + (radius * 0.75) * math.sin(overflow_angle),
+                )
+                positions[object_name] = overflow_pos
+                placed.append((overflow_pos, clearance))
 
     return positions
 
@@ -1132,6 +1251,39 @@ def _escape_attr(value):
     return _xml_escape(str(value), quote=True)
 
 
+def _simplify_relation_edges(relation_edges):
+    """
+    IMPROVED: Simplify relation edges to reduce visual clutter.
+    - Merge parallel edges (same source/target pairs)
+    - Remove redundant edges in transitive chains
+    - Preserve all unique relationships
+    """
+    if not relation_edges:
+        return []
+    
+    # Group by (source, target) to detect parallel edges
+    edges_by_pair = defaultdict(list)
+    for edge in relation_edges:
+        source_key = (edge["source"]["kind"], edge["source"]["name"])
+        target_key = (edge["target"]["kind"], edge["target"]["name"])
+        edges_by_pair[(source_key, target_key)].append(edge)
+    
+    # Deduplicate parallel edges (keep first occurrence, note count)
+    simplified = []
+    for (source_key, target_key), edges in edges_by_pair.items():
+        if len(edges) > 1:
+            # Multiple edges between same pair: merge labels
+            combined_labels = " & ".join(e["label"] for e in edges if e.get("label"))
+            merged_edge = dict(edges[0])
+            merged_edge["label"] = combined_labels if combined_labels else "..."
+            merged_edge["_parallel_count"] = len(edges)
+            simplified.append(merged_edge)
+        else:
+            simplified.append(edges[0])
+    
+    return simplified
+
+
 def _build_diagram_svg(tree):
     graph = _build_diagram_graph(tree)
     if not graph.frameworks:
@@ -1143,7 +1295,7 @@ def _build_diagram_svg(tree):
             "</svg>"
         )
 
-    roots, parent_of, children_by_parent = _build_primary_framework_tree(graph)
+    roots, parent_of, children_by_parent, all_parents = _build_primary_framework_tree(graph)
     if not roots:
         return (
             '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="160">'
@@ -1186,9 +1338,51 @@ def _build_diagram_svg(tree):
         '<marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">',
         '<polygon points="0 0, 8 4, 0 8" fill="#334155" />',
         '</marker>',
+        '<marker id="arrowhead-secondary" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">',
+        '<polygon points="0 0, 8 4, 0 8" fill="#94a3b8" />',
+        '</marker>',
         '</defs>',
         '<rect width="100%" height="100%" fill="#f8fafc" />',
     ]
+
+    # NEW: Render secondary parent relationships (all parents beyond the primary one)
+    for child_name, parent_names in all_parents.items():
+        if child_name not in framework_positions:
+            continue
+        child_cx, child_cy, child_radius = framework_positions[child_name]
+        
+        for parent_name in sorted(parent_names):
+            # Skip the primary parent (already part of main tree)
+            if parent_name == parent_of.get(child_name):
+                continue
+            
+            if parent_name not in framework_positions:
+                continue
+            
+            parent_cx, parent_cy, parent_radius = framework_positions[parent_name]
+            
+            # Find anchor points on framework edges
+            dx = child_cx - parent_cx
+            dy = child_cy - parent_cy
+            distance = math.hypot(dx, dy)
+            
+            if distance < 1e-6:
+                continue
+            
+            # Points on framework edges
+            source_x = parent_cx + (parent_radius * dx / distance)
+            source_y = parent_cy + (parent_radius * dy / distance)
+            target_x = child_cx - (child_radius * dx / distance)
+            target_y = child_cy - (child_radius * dy / distance)
+            
+            # Secondary edges are lighter and dashed
+            svg_parts.append(
+                f'<line data-secondary-parent="{_escape_attr(parent_name)}" '
+                f'data-child="{_escape_attr(child_name)}" '
+                f'x1="{source_x:.2f}" y1="{source_y:.2f}" x2="{target_x:.2f}" y2="{target_y:.2f}" '
+                f'stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4,3" '
+                f'marker-end="url(#arrowhead-secondary)" opacity="0.6" />'
+            )
 
     for framework_name, (cx, cy, radius) in sorted(
         framework_positions.items(),
@@ -1208,7 +1402,7 @@ def _build_diagram_svg(tree):
             f'stroke="{stroke}" stroke-width="2.5"{dash} />'
         )
 
-    for relation in graph.relation_edges:
+    for relation in _simplify_relation_edges(graph.relation_edges):
         source = relation["source"]
         target = relation["target"]
         source_pos = _relation_endpoint_reference(source, object_positions, framework_positions)
