@@ -1574,10 +1574,10 @@ if __name__ == "__main__":
         print("_________________") """
     
     """for adj in examples.left_adjoints:
-    render(adj)   
-    print("_________________")""" 
-    for adj in examples.right_adjoints:
         render(adj)   
-        print("_________________") 
+        print("_________________ ")"""
+    """for adj in examples.right_adjoints:
+        render(adj)   
+        print("_________________") """
 
-    svg = render_diagram(examples.right_adjoints[0], output_path="limits.svg")
+    svg = render_diagram(examples.limits[0], output_path="limits.svg")
